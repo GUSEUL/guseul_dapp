@@ -1,0 +1,16 @@
+# 맥/윈도우 찌꺼기 파일
+.DS_Store
+Thumbs.db
+
+# 프론트엔드 (Next.js) 무시할 파일
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env
+frontend/.env.local
+
+# 컨트랙트 (Foundry) 무시할 파일
+contracts/broadcast/
+contracts/cache/
+contracts/out/
+contracts/.env
