@@ -97,6 +97,7 @@ export default function Home() {
   const { switchChain } = useSwitchChain();
 
   const [activeTab, setActiveTab] = useState("main");
+  const [searchQuery, setSearchQuery] = useState("")
 
   const { writeContract, data: hash, isPending, error } = useWriteContract();
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash });
@@ -134,14 +135,32 @@ export default function Home() {
     chainId: chain?.id
   });
 
+  const [customTokensMap, setCustomTokensMap] = useState<Record<number, string[]>>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('my_custom_tokens_v2');
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (e) {
+          console.error("로딩 에러:", e);
+          return {};
+        }
+      }
+    }
+    return {};
+  });
+
+  const currentChainId = chain?.id || 0;
+  const currentCustomTokens = customTokensMap[currentChainId] || [];
 
 
   // useEffect
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('my_custom_tokens', JSON.stringify(customTokens));
+    if (typeof window !== 'undefined' && currentChainId !== 0) {
+      console.log("저장 중...", customTokensMap); // 디버깅용 로그
+      localStorage.setItem('my_custom_tokens_v2', JSON.stringify(customTokensMap));
     }
-  }, [customTokens]);
+  }, [customTokensMap, currentChainId]); // 두 변수가 바뀔 때마다 저장
 
   useEffect(() => {
     if (chain?.id) {
@@ -183,16 +202,35 @@ export default function Home() {
     contracts: address ? balanceQueries : [],
   });
 
-  const customTokenQueries = customTokens.flatMap((tokenAddr) => [
-    { address: tokenAddr as `0x${string}`, abi: erc20Abi, functionName: 'symbol', chainId: chain?.id },
-    { address: tokenAddr as `0x${string}`, abi: erc20Abi, functionName: 'decimals', chainId: chain?.id },
-    { address: tokenAddr as `0x${string}`, abi: erc20Abi, functionName: 'balanceOf', args: [address as `0x${string}`], chainId: chain?.id }
+  const customTokenQueries = currentCustomTokens.flatMap((tokenAddr) => [
+    { address: tokenAddr as `0x${string}`, abi: erc20Abi, functionName: 'symbol', chainId: currentChainId },
+    { address: tokenAddr as `0x${string}`, abi: erc20Abi, functionName: 'decimals', chainId: currentChainId },
+    { address: tokenAddr as `0x${string}`, abi: erc20Abi, functionName: 'balanceOf', args: [address as `0x${string}`], chainId: currentChainId }
   ]);
 
-  const { data: customTokensData } = useReadContracts({
+  const { data: customTokensData, refetch: refetchCustom } = useReadContracts({
     contracts: customTokenQueries,
+    query: {
+      refetchInterval: 10000, // 10,000ms = 10초마다 실행
+      staleTime: 5000,
+    }
   });
 
+  // 2. 화면용 데이터 가공 (여기도 currentCustomTokens 사용!)
+  const myCustomTokens = currentCustomTokens.map((tokenAddr, index) => {
+    const baseIdx = index * 3;
+    const symbol = customTokensData?.[baseIdx]?.result as string || '???';
+    const decimals = customTokensData?.[baseIdx + 1]?.result as number || 18;
+    const rawBalance = customTokensData?.[baseIdx + 2]?.result as bigint | undefined;
+
+    const balanceNum = rawBalance ? Number(rawBalance) / (10 ** decimals) : 0;
+
+    return {
+      address: tokenAddr,
+      symbol: symbol.toUpperCase(),
+      balance: balanceNum > 0 ? balanceNum.toFixed(4) : '0'
+    };
+  });
   const isInputValidAddress = customTokenInput.trim().length === 42 && customTokenInput.trim().startsWith('0x');
 
   // B. Wagmi 단수형 도구 사용! 한 놈만 팹니다.
@@ -221,21 +259,6 @@ export default function Home() {
     isPreviewError = true;
   }
 
-  // 화면에 그리기 좋게 데이터 정리하기
-  const myCustomTokens = customTokens.map((tokenAddr, index) => {
-    const baseIdx = index * 3; // 질문을 3개씩 묶어서 던졌기 때문
-    const symbol = customTokensData?.[baseIdx]?.result as string || '???';
-    const decimals = customTokensData?.[baseIdx + 1]?.result as number || 18; // 기본 소수점 18자리
-    const rawBalance = customTokensData?.[baseIdx + 2]?.result as bigint | undefined;
-
-    const balanceNum = rawBalance ? Number(rawBalance) / (10 ** decimals) : 0;
-
-    return {
-      address: tokenAddr,
-      symbol: symbol.toUpperCase(),
-      balance: balanceNum > 0 ? balanceNum.toFixed(4) : '0' // 소수점 4자리까지만 표시
-    };
-  });
 
 
   // 4. 화면에 그리기 쉽게 { "usdt": "100", "usdc": "50" } 형태의 깔끔한 데이터로 정리합니다.
@@ -290,6 +313,22 @@ export default function Home() {
 
   const finalPortfolio = [...top10Portfolio, ...customPortfolio];
 
+  const totalValue = finalPortfolio.reduce((acc, coin) => {
+    const price = coin.current_price || 0;
+    const balance = parseFloat(coin.balance) || 0;
+    return acc + (price * balance);
+  }, 0);
+
+  const filteredPortfolio = finalPortfolio.filter((coin) => {
+    const query = searchQuery.toLowerCase();
+    return (
+      coin.name.toLowerCase().includes(query) ||
+      coin.symbol.toLowerCase().includes(query)
+    );
+  });
+
+
+
 
   //functions
   const handleApprove = () => {
@@ -305,34 +344,44 @@ export default function Home() {
   };
 
   const handleAddCustomToken = () => {
-    const trimmed = customTokenInput.trim().toLowerCase(); // 소문자로 통일해서 비교
+    const trimmed = customTokenInput.trim().toLowerCase();
+
     // 1. 형식 체크
     if (trimmed.length !== 42 || !trimmed.startsWith('0x')) {
       alert("올바른 컨트랙트 주소 형식이 아닙니다.");
       return;
     }
-    // 2. 현재 네트워크의 '기본 등록 토큰' 주소들과 비교 (핵심!)
-    if (chain?.id && TOKEN_ADDRESSES[chain.id]) {
-      const existingAddresses = Object.values(TOKEN_ADDRESSES[chain.id]).map(addr => addr.toLowerCase());
 
+    // 2. 네트워크 연결 확인
+    if (!currentChainId) {
+      alert("네트워크를 먼저 연결해 주세요.");
+      return;
+    }
+
+    // 3. 현재 네트워크의 '기본 등록 토큰' 주소들과 비교 (중복 방지)
+    if (TOKEN_ADDRESSES[currentChainId]) {
+      const existingAddresses = Object.values(TOKEN_ADDRESSES[currentChainId]).map(addr => addr.toLowerCase());
       if (existingAddresses.includes(trimmed)) {
-        // 어떤 토큰인지 이름을 찾아주면 더 친절하겠죠?
-        const tokenSymbol = Object.keys(TOKEN_ADDRESSES[chain.id]).find(
-          key => TOKEN_ADDRESSES[chain.id][key].toLowerCase() === trimmed
-        );
-        alert(`🚨 '${tokenSymbol?.toUpperCase()}'는 이미 기본 리스트에 있는 토큰입니다!`);
+        alert("이미 기본 리스트에 있는 토큰입니다!");
         return;
       }
     }
-    // 3. 이미 추가한 '커스텀 토큰' 리스트와도 중복 체크
-    if (customTokens.some(addr => addr.toLowerCase() === trimmed)) {
+
+    // 4. 현재 네트워크의 '이미 추가된 커스텀 토큰'과 비교 (중복 방지)
+    // 💡 여기서 currentCustomTokens 변수를 사용합니다.
+    if (currentCustomTokens.includes(trimmed)) {
       alert("이미 추가하신 커스텀 토큰입니다.");
       return;
     }
-    // 4. 모든 검사 통과 시 추가
-    setCustomTokens([...customTokens, customTokenInput.trim()]);
-    setCustomTokenInput("");
-    alert("새로운 토큰이 추가되었습니다!");
+
+    // 5. 모든 검사 통과 시: 해당 네트워크(chainId) 박스에만 저장
+    setCustomTokensMap(prev => ({
+      ...prev,
+      [currentChainId]: [...(prev[currentChainId] || []), customTokenInput.trim()]
+    }));
+
+    setCustomTokenInput(""); // 입력창 초기화
+    alert("현재 네트워크에 토큰이 추가되었습니다!");
   };
 
   const handleRemoveToken = (tokenAddr: string) => {
@@ -404,6 +453,7 @@ export default function Home() {
     */
 
   return (
+
     <div style={{ padding: '50px', fontFamily: 'sans-serif', maxWidth: '600px', margin: '0 auto' }}>
       <h1>GUSEUL</h1>
       <ConnectButton />
@@ -428,7 +478,26 @@ export default function Home() {
 
           {activeTab === 'main' && (
             <div style={{ marginTop: '20px' }}>
+              <div style={{ maxWidth: '600px', margin: '0 auto', padding: '20px' }}>
+                {/* 💰 총자산 카드 섹션 */}
+                <div style={{
+                  background: 'linear-gradient(135deg, #0070f3 0%, #00a4ff 100%)',
+                  padding: '30px',
+                  borderRadius: '16px',
+                  color: 'white',
+                  marginBottom: '25px',
+                  boxShadow: '0 4px 12px rgba(0, 112, 243, 0.2)',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: '14px', opacity: 0.9, marginBottom: '8px' }}>Estimated Total Balance</div>
+                  <div style={{ fontSize: '36px', fontWeight: 'bold' }}>
+                    ${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
 
+
+                {/* ... 이후 토큰 추가 입력창 및 리스트 UI ... */}
+              </div>
 
               <div style={{ position: 'relative', marginBottom: '25px', zIndex: 10 }}>
 
@@ -568,6 +637,8 @@ export default function Home() {
                   </ul>
                 )}
               </div>
+
+
               {/* 🔥 새로 추가 5: 커스텀 토큰 입력창 및 리스트 UI */}
               <div style={{ marginTop: '30px', backgroundColor: 'white', border: '1px solid #ddd', borderRadius: '12px', padding: '15px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>
                 <h3 style={{ marginTop: 0, marginBottom: '15px', fontSize: '18px' }}>✨ 내 커스텀 토큰</h3>
