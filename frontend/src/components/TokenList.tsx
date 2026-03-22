@@ -16,6 +16,27 @@ export default function TokenList() {
     const { address, isConnected } = useAccount();
     const [tokens, setTokens] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [displayCurrency, setDisplayCurrency] = useState('TOKEN');
+
+    const RATES = {
+        USDC_TO_KRW: 1350,
+        ETH_TO_USDC: 3000,
+    };
+
+    const getConvertedBalance = (symbol: string, balanceStr: string) => {
+        const numBalance = Number(balanceStr);
+        if (isNaN(numBalance)) return "0";
+
+        let priceInUsdc = 0.1;
+        if (symbol.toUpperCase().includes('USDC')) priceInUsdc = 1;
+        if (symbol.toUpperCase().includes('ETH')) priceInUsdc = RATES.ETH_TO_USDC;
+
+        if (displayCurrency === 'TOKEN') return `${numBalance} ${symbol}`;
+        if (displayCurrency === 'USDC') return `${(numBalance * priceInUsdc).toFixed(2)} USDC`;
+        if (displayCurrency === 'ETH') return `${(numBalance * priceInUsdc / RATES.ETH_TO_USDC).toFixed(6)} ETH`;
+        if (displayCurrency === 'KRW') return `${Math.floor(numBalance * priceInUsdc * RATES.USDC_TO_KRW).toLocaleString()} KRW`;
+
+    }
 
     useEffect(() => {
         const fetchTokens = async () => {
@@ -71,6 +92,22 @@ export default function TokenList() {
         <div className="p-6 bg-white shadow-lg rounded-2xl max-w-sm mx-auto mt-6 border border-gray-200">
             <h3 className="text-lg font-bold text-gray-800 mb-4">Tokens</h3>
 
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '15px' }}>
+                {['TOKEN', 'USDC', 'ETH', 'KRW'].map((currency) => (
+                    <button
+                        key={currency}
+                        onClick={() => setDisplayCurrency(currency)}
+                        style={{
+                            padding: '5px 10px', fontSize: '12px', cursor: 'pointer', border: 'none', borderRadius: '4px',
+                            backgroundColor: displayCurrency === currency ? '#0070f3' : '#e0e0e0',
+                            color: displayCurrency === currency ? 'white' : 'black'
+                        }}
+                    >
+                        {currency === 'TOKEN' ? '기본 수량' : `${currency} 환산`}
+                    </button>
+                ))}
+            </div>
+
             {isLoading ? (
                 <p className="text-sm text-gray-500 text-center py-4">지갑 털어보는 중...</p>
             ) : tokens.length === 0 ? (
@@ -93,7 +130,9 @@ export default function TokenList() {
                                 </div>
                             </div>
                             <div className="font-bold text-gray-800">
-                                {token.balance}
+                                <p style={{ margin: '5px 0', fontSize: '18px', fontWeight: 'bold' }}>
+                                    {getConvertedBalance(token.symbol, token.balance)}
+                                </p>
                             </div>
                         </li>
                     ))}

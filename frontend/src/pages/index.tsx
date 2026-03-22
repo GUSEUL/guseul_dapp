@@ -1,10 +1,26 @@
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
-import { useState } from 'react';
-import TokenList from "../components/TokenList";
+import { useAccount, useSwitchChain, useReadContracts, useReadContract, useWriteContract, useWaitForTransactionReceipt, useBalance } from 'wagmi';
+import { useState, useEffect } from 'react';
 
 const CONTRACT_ADDRESS = "0x357F2b6137f628074198d3BC71cae159D050768b";
 const USDC_ADDRESS = "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d";
+
+const TOKEN_ADDRESSES: Record<number, Record<string, `0x${string}`>> = {
+  1: { // 이더리움 메인넷
+    usdt: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+    usdc: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+    btc: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', // WBTC (포장된 비트코인)
+  },
+  137: { // 폴리곤
+    usdt: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
+    usdc: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',
+    btc: '0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6', // WBTC
+  },
+  421614: { // 아비트럼 세포리아 (테스트넷)
+    usdc: '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d',
+    // 테스트넷은 토큰이 제한적이므로 우선 USDC만 넣습니다.
+  }
+};
 
 const abi = [
   {
@@ -47,43 +63,235 @@ const erc20Abi = [
     "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
     "stateMutability": "view",
     "type": "function"
+  },
+
+  {
+    "inputs": [{ "internalType": "address", "name": "account", "type": "address" }],
+    "name": "balanceOf",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+
+  {
+    "inputs": [],
+    "name": "symbol",
+    "outputs": [{ "internalType": "string", "name": "", "type": "string" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+
+  {
+    "inputs": [],
+    "name": "decimals",
+    "outputs": [{ "internalType": "uint8", "name": "", "type": "uint8" }],
+    "stateMutability": "view",
+    "type": "function"
   }
 ] as const;
 
 export default function Home() {
+  //State
   const { address, isConnected, chain } = useAccount();
 
+  const { switchChain } = useSwitchChain();
+
   const [activeTab, setActiveTab] = useState("main");
-
-
-  const [addressInput, setAddressInput] = useState("0x2205AC6063F32f4857fd65d24700fB5591Ea1Dc7, 0x0f845e28fa26DcDF8e21Dd52a895f8300Fc90dc8");
-  const [amountInput, setAmountInput] = useState("1, 2");
-
-  // 1. 내 지갑의 잔고 읽어오기
-  const { data: balance } = useReadContract({
-    address: CONTRACT_ADDRESS,
-    abi: abi,
-    functionName: 'getUsdcBalance',
-    args: [address as `0x${string}`],
-    query: {
-      refetchInterval: 3000,
-    }
-  });
-
-  // 2. 내가 스마트 컨트랙트에 승인(Approve)해준 금액 읽어오기
-  const { data: allowance } = useReadContract({
-    address: USDC_ADDRESS,
-    abi: erc20Abi,
-    functionName: 'allowance',
-    args: address ? [address, CONTRACT_ADDRESS as `0x${string}`] : undefined,
-    query: {
-      refetchInterval: 3000,
-    }
-  });
 
   const { writeContract, data: hash, isPending, error } = useWriteContract();
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash });
 
+  const [coinList, setCoinList] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const [addressInput, setAddressInput] = useState("0x2205AC6063F32f4857fd65d24700fB5591Ea1Dc7, 0x0f845e28fa26DcDF8e21Dd52a895f8300Fc90dc8");
+  const [amountInput, setAmountInput] = useState("1, 2");
+
+  const [customTokenInput, setCustomTokenInput] = useState("");
+  const [customTokens, setCustomTokens] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('my_custom_tokens');
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
+  });
+
+  const [isNetworkOpen, setIsNetworkOpen] = useState(false);
+
+  const networkOptions = [
+    { id: 421614, name: 'Arbitrum Sepolia', image: 'https://assets.coingecko.com/coins/images/16547/small/arbitrum.png' },
+    { id: 1, name: 'Ethereum Mainnet', image: 'https://assets.coingecko.com/coins/images/279/small/ethereum.png' },
+    { id: 137, name: 'Polygon', image: 'https://assets.coingecko.com/coins/images/4713/small/matic-token-icon.png' },
+  ];
+  const [selectedNetwork, setSelectedNetwork] = useState(networkOptions[0]);
+
+  const validTokens = coinList.filter(coin =>
+    chain?.id && TOKEN_ADDRESSES[chain.id]?.[coin.symbol.toLowerCase()]
+  )
+
+  const { data: nativeBalance } = useBalance({
+    address: address as '0x${string}',
+    chainId: chain?.id
+  });
+
+
+
+  // useEffect
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('my_custom_tokens', JSON.stringify(customTokens));
+    }
+  }, [customTokens]);
+
+  useEffect(() => {
+    if (chain?.id) {
+      const currentNet = networkOptions.find(n => n.id === chain.id);
+      if (currentNet) {
+        setSelectedNetwork(currentNet);
+      }
+    }
+  }, [chain?.id]);
+
+  useEffect(() => {
+    const fetchCoins = async () => {
+      try {
+        const response = await fetch(
+          "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=10&page=1&sparkline=false"
+        );
+        const data = await response.json();
+        setCoinList(data);
+      } catch (error) {
+        console.error("코인 데이터를 불러오는데 실패했습니다:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchCoins();
+  }, []);
+
+  const balanceQueries = validTokens.map(coin => ({
+    address: TOKEN_ADDRESSES[chain!.id][coin.symbol.toLowerCase()],
+    abi: erc20Abi,
+    functionName: 'balanceOf',
+    args: [address as `0x${string}`],
+    chainId: chain?.id,
+  }));
+
+  // 3. Wagmi 멀티콜! 한 번의 요청으로 여러 컨트랙트의 잔고를 동시에 가져옵니다.
+  const { data: balancesData } = useReadContracts({
+    contracts: address ? balanceQueries : [],
+  });
+
+  const customTokenQueries = customTokens.flatMap((tokenAddr) => [
+    { address: tokenAddr as `0x${string}`, abi: erc20Abi, functionName: 'symbol', chainId: chain?.id },
+    { address: tokenAddr as `0x${string}`, abi: erc20Abi, functionName: 'decimals', chainId: chain?.id },
+    { address: tokenAddr as `0x${string}`, abi: erc20Abi, functionName: 'balanceOf', args: [address as `0x${string}`], chainId: chain?.id }
+  ]);
+
+  const { data: customTokensData } = useReadContracts({
+    contracts: customTokenQueries,
+  });
+
+  const isInputValidAddress = customTokenInput.trim().length === 42 && customTokenInput.trim().startsWith('0x');
+
+  // B. Wagmi 단수형 도구 사용! 한 놈만 팹니다.
+  const { data: previewSymbolData, error: previewError } = useReadContract({
+    address: isInputValidAddress ? customTokenInput.trim() as `0x${string}` : undefined,
+    abi: erc20Abi,
+    functionName: 'symbol',
+    chainId: chain?.id,
+  });
+
+  // C. 화면에 띄울 문구 정리
+  let previewMessage = "";
+  let isPreviewError = false;
+
+  if (isInputValidAddress) {
+    if (previewSymbolData) {
+      previewMessage = ` (${previewSymbolData.toString().toUpperCase()})`; // 💰 정상: (USDC)
+    } else if (previewError) {
+      previewMessage = " (토큰 정보를 가져올 수 없는 주소)"; // ❌ 에러: 주소가 아님
+      isPreviewError = true;
+    } else {
+      previewMessage = " (정보 불러오는 중...)"; // ⏳ 로딩
+    }
+  } else if (customTokenInput.trim().length > 0) {
+    previewMessage = " (올바른 주소 형식이 아닙니다)"; // ❌ 에러: 형식 틀림
+    isPreviewError = true;
+  }
+
+  // 화면에 그리기 좋게 데이터 정리하기
+  const myCustomTokens = customTokens.map((tokenAddr, index) => {
+    const baseIdx = index * 3; // 질문을 3개씩 묶어서 던졌기 때문
+    const symbol = customTokensData?.[baseIdx]?.result as string || '???';
+    const decimals = customTokensData?.[baseIdx + 1]?.result as number || 18; // 기본 소수점 18자리
+    const rawBalance = customTokensData?.[baseIdx + 2]?.result as bigint | undefined;
+
+    const balanceNum = rawBalance ? Number(rawBalance) / (10 ** decimals) : 0;
+
+    return {
+      address: tokenAddr,
+      symbol: symbol.toUpperCase(),
+      balance: balanceNum > 0 ? balanceNum.toFixed(4) : '0' // 소수점 4자리까지만 표시
+    };
+  });
+
+
+  // 4. 화면에 그리기 쉽게 { "usdt": "100", "usdc": "50" } 형태의 깔끔한 데이터로 정리합니다.
+  const myBalances = validTokens.reduce((acc, coin, index) => {
+    const rawBalance = balancesData?.[index]?.result as bigint | undefined;
+    const balanceNum = rawBalance ? Number(rawBalance) : 0;
+    // 임시로 토큰 소수점을 6자리(USDC 기준)로 계산합니다. (추후 토큰별 디테일 적용 가능)
+    acc[coin.symbol.toLowerCase()] = balanceNum > 0 ? (balanceNum / 1000000).toString() : '0';
+    return acc;
+  }, {} as Record<string, string>);
+
+  if (nativeBalance) {
+    const balanceNum = Number(nativeBalance.value) / 10 ** nativeBalance.decimals;
+
+    if (balanceNum > 0) {
+      // 이더리움 메인넷(1) 또는 아비트럼 세포리아(421614)일 때는 심볼이 'eth'
+      if (chain?.id === 1 || chain?.id === 421614) {
+        myBalances['eth'] = balanceNum.toFixed(4); // 소수점 4자리까지만 깔끔하게 표시
+      }
+      // 폴리곤(137)일 때는 심볼이 'matic' (또는 'pol')
+      else if (chain?.id === 137) {
+        myBalances['matic'] = balanceNum.toFixed(4);
+      }
+    }
+  }
+
+  const top10Portfolio = coinList.map((coin, index) => {
+    let balanceStr = myBalances[coin.symbol.toLowerCase()] || '0';
+
+    return {
+      id: coin.id,
+      name: coin.name,
+      symbol: coin.symbol.toUpperCase(),
+      image: coin.image,
+      current_price: coin.current_price,
+      balance: balanceStr,
+      isCustom: false,
+      sortIndex: index
+    };
+  });
+
+  const customPortfolio = myCustomTokens.map((token, index) => ({
+    id: token.address, // 고유 ID로 주소 사용
+    name: '커스텀 토큰', // 이름은 통일
+    symbol: token.symbol,
+    image: null, // 아이콘 이미지가 없으니 나중에 기본 로고로 처리
+    current_price: 0, // 💸 커스텀 토큰은 현재 가격을 알 수 없습니다.
+    balance: token.balance,
+    isCustom: true,
+    sortIndex: 10 + index // Top 10 뒤에 붙이기 위해 index를 조정
+  }));
+
+  const finalPortfolio = [...top10Portfolio, ...customPortfolio];
+
+
+  //functions
   const handleApprove = () => {
     writeContract({
       address: USDC_ADDRESS,
@@ -96,66 +304,104 @@ export default function Home() {
     });
   };
 
-  const handleBatchTransfer = () => {
-    const recipientsArray = addressInput.split(',').map(addr => addr.trim());
-    const amountsArray = amountInput.split(',').map(amt => BigInt(Number(amt.trim()) * 1000000));
+  const handleAddCustomToken = () => {
+    const trimmed = customTokenInput.trim().toLowerCase(); // 소문자로 통일해서 비교
+    // 1. 형식 체크
+    if (trimmed.length !== 42 || !trimmed.startsWith('0x')) {
+      alert("올바른 컨트랙트 주소 형식이 아닙니다.");
+      return;
+    }
+    // 2. 현재 네트워크의 '기본 등록 토큰' 주소들과 비교 (핵심!)
+    if (chain?.id && TOKEN_ADDRESSES[chain.id]) {
+      const existingAddresses = Object.values(TOKEN_ADDRESSES[chain.id]).map(addr => addr.toLowerCase());
 
-    writeContract({
-      address: CONTRACT_ADDRESS,
-      abi: abi,
-      functionName: 'batchTransferUsdc',
-      args: [recipientsArray as `0x${string}`[], amountsArray],
-    });
+      if (existingAddresses.includes(trimmed)) {
+        // 어떤 토큰인지 이름을 찾아주면 더 친절하겠죠?
+        const tokenSymbol = Object.keys(TOKEN_ADDRESSES[chain.id]).find(
+          key => TOKEN_ADDRESSES[chain.id][key].toLowerCase() === trimmed
+        );
+        alert(`🚨 '${tokenSymbol?.toUpperCase()}'는 이미 기본 리스트에 있는 토큰입니다!`);
+        return;
+      }
+    }
+    // 3. 이미 추가한 '커스텀 토큰' 리스트와도 중복 체크
+    if (customTokens.some(addr => addr.toLowerCase() === trimmed)) {
+      alert("이미 추가하신 커스텀 토큰입니다.");
+      return;
+    }
+    // 4. 모든 검사 통과 시 추가
+    setCustomTokens([...customTokens, customTokenInput.trim()]);
+    setCustomTokenInput("");
+    alert("새로운 토큰이 추가되었습니다!");
   };
 
-  // --- 💡 안전장치 로직 (버튼 무력화용 계산) ---
-  let totalSendAmount = 0n;
-  let isAmountValid = true;
-  let addressCount = 0;
-  let amountCount = 0;
-
-  try {
-    const addrs = addressInput.split(',').map(a => a.trim()).filter(a => a !== '');
-    const amts = amountInput.split(',').map(a => a.trim()).filter(a => a !== '');
-
-    addressCount = addrs.length;
-    amountCount = amts.length;
-
-    amts.forEach(amt => {
-      const num = Number(amt);
-      if (isNaN(num) || num <= 0) throw new Error("유효하지 않은 숫자");
-      totalSendAmount += BigInt(Math.floor(num * 1000000));
-    });
-  } catch (e) {
-    isAmountValid = false;
-  }
-
-  const currentBalance = balance ? (balance as bigint) : 0n;
-  const currentAllowance = allowance ? (allowance as bigint) : 0n;
-
-  // 상태 판별
-  const isLengthMatch = addressCount > 0 && addressCount === amountCount;
-  const isBalanceSufficient = currentBalance >= totalSendAmount;
-  const isAllowanceSufficient = currentAllowance >= totalSendAmount;
-  const hasNoAllowance = currentAllowance === 0n;
-
-  // 버튼 텍스트 및 활성화 여부 결정
-  let transferBtnText = "다중 송금 실행하기";
-  let isTransferDisabled = isPending || isConfirming || !isAmountValid || !isLengthMatch || !isBalanceSufficient || !isAllowanceSufficient;
-
-  if (!isLengthMatch) {
-    transferBtnText = "주소와 금액의 개수가 다릅니다";
-  } else if (!isAmountValid) {
-    transferBtnText = "금액을 올바르게 입력하세요";
-  } else if (!isBalanceSufficient) {
-    transferBtnText = "잔고에 돈이 부족합니다";
-  } else if (hasNoAllowance) {
-    transferBtnText = "approve를 먼저 진행하세요";
-  } else if (!isAllowanceSufficient) {
-    transferBtnText = "approve한 금액보다 더 많은 금액을 보낼 수 없습니다";
-  } else if (isPending || isConfirming) {
-    transferBtnText = "처리 중...";
-  }
+  const handleRemoveToken = (tokenAddr: string) => {
+    if (confirm("이 토큰을 리스트에서 삭제하시겠습니까?")) {
+      setCustomTokens(prev => prev.filter(addr => addr.toLowerCase() !== tokenAddr.toLowerCase()));
+    }
+  };
+  /*
+    const handleBatchTransfer = () => {
+      const recipientsArray = addressInput.split(',').map(addr => addr.trim());
+      const amountsArray = amountInput.split(',').map(amt => BigInt(Number(amt.trim()) * 1000000));
+  
+      writeContract({
+        address: CONTRACT_ADDRESS,
+        abi: abi,
+        functionName: 'batchTransferUsdc',
+        args: [recipientsArray as `0x${string}`[], amountsArray],
+      });
+    };
+  
+    // --- 💡 안전장치 로직 (버튼 무력화용 계산) ---
+    let totalSendAmount = 0n;
+    let isAmountValid = true;
+    let addressCount = 0;
+    let amountCount = 0;
+  
+    try {
+      const addrs = addressInput.split(',').map(a => a.trim()).filter(a => a !== '');
+      const amts = amountInput.split(',').map(a => a.trim()).filter(a => a !== '');
+  
+      addressCount = addrs.length;
+      amountCount = amts.length;
+  
+      amts.forEach(amt => {
+        const num = Number(amt);
+        if (isNaN(num) || num <= 0) throw new Error("유효하지 않은 숫자");
+        totalSendAmount += BigInt(Math.floor(num * 1000000));
+      });
+    } catch (e) {
+      isAmountValid = false;
+    }
+  
+    const currentBalance = balance ? (balance as bigint) : 0n;
+    const currentAllowance = allowance ? (allowance as bigint) : 0n;
+  
+    // 상태 판별
+    const isLengthMatch = addressCount > 0 && addressCount === amountCount;
+    const isBalanceSufficient = currentBalance >= totalSendAmount;
+    const isAllowanceSufficient = currentAllowance >= totalSendAmount;
+    const hasNoAllowance = currentAllowance === 0n;
+  
+    // 버튼 텍스트 및 활성화 여부 결정
+    let transferBtnText = "다중 송금 실행하기";
+    let isTransferDisabled = isPending || isConfirming || !isAmountValid || !isLengthMatch || !isBalanceSufficient || !isAllowanceSufficient;
+  
+    if (!isLengthMatch) {
+      transferBtnText = "주소와 금액의 개수가 다릅니다";
+    } else if (!isAmountValid) {
+      transferBtnText = "금액을 올바르게 입력하세요";
+    } else if (!isBalanceSufficient) {
+      transferBtnText = "잔고에 돈이 부족합니다";
+    } else if (hasNoAllowance) {
+      transferBtnText = "approve를 먼저 진행하세요";
+    } else if (!isAllowanceSufficient) {
+      transferBtnText = "approve한 금액보다 더 많은 금액을 보낼 수 없습니다";
+    } else if (isPending || isConfirming) {
+      transferBtnText = "처리 중...";
+    }
+    */
 
   return (
     <div style={{ padding: '50px', fontFamily: 'sans-serif', maxWidth: '600px', margin: '0 auto' }}>
@@ -180,21 +426,186 @@ export default function Home() {
             </button>
           </div>
 
-          {/* 💡 탭 1: Main Page (네트워크, 토큰 목록 출력) */}
           {activeTab === 'main' && (
             <div style={{ marginTop: '20px' }}>
-              <div style={{ padding: '15px', backgroundColor: '#f9f9f9', borderRadius: '8px', marginBottom: '20px' }}>
-                <p style={{ margin: '0 0 10px 0' }}><strong>네트워크:</strong> {chain?.name || 'Unknown Network'}</p>
-                {/* 지갑 총액(Total Balance)은 RainbowKit ConnectButton에 기본 표시되므로, 여기서는 네트워크 정보만 강조했습니다. */}
+
+
+              <div style={{ position: 'relative', marginBottom: '25px', zIndex: 10 }}>
+
+                <button
+                  onClick={() => setIsNetworkOpen(!isNetworkOpen)}
+                  style={{
+                    width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '15px', backgroundColor: 'white', border: '1px solid #ccc', borderRadius: '12px',
+                    cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontSize: '16px', fontWeight: 'bold'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <span style={{ color: '#888', marginRight: '10px', fontSize: '14px', fontWeight: 'normal' }}>네트워크:</span>
+                    {/* 여기는 net이 아니라 selectedNetwork를 써야 합니다 */}
+                    <img src={selectedNetwork.image} alt={selectedNetwork.name} style={{ width: '24px', height: '24px', marginRight: '8px', borderRadius: '50%' }} />
+                    {selectedNetwork.name}
+                  </div>
+                  <span>{isNetworkOpen ? '▲' : '▼'}</span>
+                </button>
+
+                {isNetworkOpen && (
+                  <ul style={{
+                    position: 'absolute', top: '100%', left: 0, width: '100%', marginTop: '5px',
+                    backgroundColor: 'white', border: '1px solid #ddd', borderRadius: '12px',
+                    listStyle: 'none', padding: 0, overflow: 'hidden', boxShadow: '0 8px 16px rgba(0,0,0,0.1)'
+                  }}>
+                    {networkOptions.map((net) => (
+                      <li key={net.name}>
+                        <button
+                          onClick={() => {
+                            setIsNetworkOpen(false);
+                            if (switchChain) {
+                              switchChain({ chainId: net.id })
+                            }
+                          }}
+                          style={{
+                            width: '100%', display: 'flex', alignItems: 'center', padding: '15px',
+                            backgroundColor: selectedNetwork.name === net.name ? '#f0f7ff' : 'white',
+                            border: 'none', borderBottom: '1px solid #eee', cursor: 'pointer', fontSize: '16px',
+                            transition: '0.2s'
+                          }}
+                          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f9f9f9'}
+                          onMouseOut={(e) => e.currentTarget.style.backgroundColor = selectedNetwork.name === net.name ? '#f0f7ff' : 'white'}
+                        >
+                          <img src={net.image} alt={net.name} style={{ width: '24px', height: '24px', marginRight: '10px', borderRadius: '50%' }} />
+                          {net.name}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
 
-              <h3>내 토큰 목록</h3>
-              <TokenList />
+              <h3>Tokens</h3>
+
+              <div style={{ backgroundColor: 'white', border: '1px solid #ddd', borderRadius: '12px', padding: '10px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>
+                {isLoading ? (
+                  <p style={{ textAlign: 'center', padding: '20px', color: '#888' }}>데이터를 불러오는 중입니다...</p>
+                ) : (
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                    {/* 🔥 2단계: 합쳐진 finalPortfolio 리스트를 그립니다! */}
+                    {finalPortfolio.map((coin, index) => {
+                      const hasBalance = coin.balance !== '0' && coin.balance !== '0.0000';
+
+                      return (
+                        <li key={coin.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                          {/* 💡 button 대신 div를 사용하고, 클릭 이벤트는 여기에 겁니다. */}
+                          <div
+                            onClick={() => alert(`${coin.name} 정보 페이지!`)}
+                            style={{
+                              width: '100%',
+                              display: 'flex',
+                              justifyContent: 'space-between', // 양 끝으로 밀어주기
+                              alignItems: 'center',
+                              padding: '15px 10px',
+                              cursor: 'pointer',
+                              transition: 'background-color 0.2s',
+                            }}
+                            onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#f9f9f9')}
+                            onMouseOut={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                          >
+                            {/* --- 왼쪽 영역 (순번 + 아이콘 + 이름) --- */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <span style={{ color: '#aaa', fontWeight: 'bold', width: '20px' }}>{index + 1}</span>
+
+                              {coin.image ? (
+                                <img src={coin.image} alt={coin.name} style={{ width: '28px', height: '28px', borderRadius: '50%' }} />
+                              ) : (
+                                <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#eee', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', color: '#888' }}>?</div>
+                              )}
+
+                              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <span style={{ fontWeight: '600', color: '#333' }}>
+                                  {coin.name} <span style={{ fontSize: '12px', color: '#888', fontWeight: '400' }}>({coin.symbol})</span>
+                                </span>
+                                {coin.isCustom && <span style={{ fontSize: '10px', color: '#aaa' }}>{coin.id.slice(0, 10)}...</span>}
+                              </div>
+                            </div>
+
+                            {/* --- 오른쪽 영역 (가격 + 잔고 + 삭제버튼) --- */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                              <div style={{ textAlign: 'right' }}>
+                                {coin.current_price > 0 && (
+                                  <div style={{ fontSize: '13px', color: '#666' }}>${coin.current_price.toLocaleString()}</div>
+                                )}
+                                <div style={{ fontSize: '15px', color: hasBalance ? '#0070f3' : '#999', fontWeight: 'bold' }}>
+                                  {coin.balance} {coin.symbol}
+                                </div>
+                              </div>
+
+                              {/* 🔥 삭제 버튼: 스타일을 더 깔끔하게 다듬었습니다. */}
+                              {coin.isCustom && (
+                                <div
+                                  onClick={(e) => {
+                                    e.stopPropagation(); // 부모 div의 클릭 이벤트 방지
+                                    handleRemoveToken(coin.id);
+                                  }}
+                                  style={{
+                                    padding: '5px 10px',
+                                    backgroundColor: '#fff1f0',
+                                    color: '#ff4d4f',
+                                    borderRadius: '6px',
+                                    fontSize: '11px',
+                                    fontWeight: '600',
+                                    border: '1px solid #ffa39e',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  삭제
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+              {/* 🔥 새로 추가 5: 커스텀 토큰 입력창 및 리스트 UI */}
+              <div style={{ marginTop: '30px', backgroundColor: 'white', border: '1px solid #ddd', borderRadius: '12px', padding: '15px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>
+                <h3 style={{ marginTop: 0, marginBottom: '15px', fontSize: '18px' }}>✨ 내 커스텀 토큰</h3>
+
+                {/* 주소 입력창과 추가 버튼 */}
+                <div style={{ position: 'relative', marginBottom: '15px' }}>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <input
+                      type="text"
+                      value={customTokenInput}
+                      onChange={(e) => setCustomTokenInput(e.target.value)}
+                      placeholder="토큰 컨트랙트 주소 입력 (0x...)"
+                      style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #ccc', fontSize: '14px' }}
+                    />
+                    <button
+                      onClick={handleAddCustomToken}
+                      style={{ padding: '10px 20px', backgroundColor: '#0070f3', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                    >
+                      추가
+                    </button>
+                  </div>
+
+                  {/* 🌟 4단계: 입력창 바로 아래에 빨간색 미리보기 문구 표시 */}
+                  {previewMessage && (
+                    <div style={{
+                      position: 'absolute', top: '100%', left: '10px', marginTop: '3px',
+                      fontSize: '12px', color: isPreviewError ? '#d00000' : '#888', fontWeight: 'bold'
+                    }}>
+                      {previewMessage}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
           {/* 💡 탭 2: Transfer Page (기존 송금 폼) */}
-          {activeTab === 'transfer' && (
+          {/*{activeTab === 'transfer' && (
             <div style={{ marginTop: '20px', padding: '20px', border: '1px solid #ccc', borderRadius: '10px' }}>
               <h2>Transfer USDC</h2>
               <p><strong>My Balance:</strong> {balance ? Number(balance) / 1000000 : 0} USDC</p>
@@ -259,6 +670,7 @@ export default function Home() {
               {isConfirmed && <p style={{ color: 'green', fontWeight: 'bold', marginTop: '10px' }}>Transaction Complete!</p>}
             </div>
           )}
+            */}
         </>
       )}
     </div>
