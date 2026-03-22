@@ -6,19 +6,48 @@ const CONTRACT_ADDRESS = "0x357F2b6137f628074198d3BC71cae159D050768b";
 const USDC_ADDRESS = "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d";
 
 const TOKEN_ADDRESSES: Record<number, Record<string, `0x${string}`>> = {
-  1: { // 이더리움 메인넷
+  // 1. Ethereum Mainnet
+  1: {
+    eth: '0x0000000000000000000000000000000000000000', // 네이티브
     usdt: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
     usdc: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-    btc: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', // WBTC (포장된 비트코인)
+    steth: '0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84',
+    wbtc: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
+    sol: '0xD31695Ad3Ec77E7AC521223527B3F182853B44D5', // Wrapped
+    link: '0x514910771AF9Ca656af840dff83E8264EcF986CA',
+    uni: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984',
   },
-  137: { // 폴리곤
-    usdt: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
-    usdc: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',
-    btc: '0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6', // WBTC
+  // 10. Optimism
+  10: {
+    usdc: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85',
+    op: '0x4200000000000000000000000000000000000042',
+    weth: '0x4200000000000000000000000000000000000006',
   },
-  421614: { // 아비트럼 세포리아 (테스트넷)
+  // 56. BNB Smart Chain
+  56: {
+    usdt: '0x55d398326f99059fF775485246999027B3197955',
+    btcb: '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c',
+    eth: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8',
+  },
+  // 8453. Base
+  8453: {
+    usdc: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    cbeth: '0x2Ae3F1Ec7F1F58411d959E01E62Cc2326f9B4844',
+  },
+  // 42161. Arbitrum One
+  42161: {
+    usdc: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+    arb: '0x912CE59144191C1204E64559FE8253a0e49E6548',
+    link: '0xf97f4df75117a78c1A5a0DBb814Af92458539FB4',
+  },
+  // 59144. Linea
+  59144: {
+    usdc: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff',
+    weth: '0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f',
+  },
+  // 421614. Arbitrum Sepolia (테스트용)
+  421614: {
     usdc: '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d',
-    // 테스트넷은 토큰이 제한적이므로 우선 USDC만 넣습니다.
   }
 };
 
@@ -119,12 +148,62 @@ export default function Home() {
 
   const [isNetworkOpen, setIsNetworkOpen] = useState(false);
 
+  const NETWORK_COIN_MAPPING: Record<number, string> = {
+    1: 'ethereum',         // Ethereum
+    137: 'matic-network',  // Polygon
+    42161: 'arbitrum',     // Arbitrum
+    10: 'optimism',        // Optimism
+    8453: 'base',          // Base
+    56: 'binancecoin',     // BNB Chain
+    59144: 'linea-build',  // Linea
+  };
+  const [prices, setPrices] = useState<Record<string, {
+    price: number;
+    image: string;
+    symbol: string;
+    name: string;
+  }>>({});
+
   const networkOptions = [
-    { id: 421614, name: 'Arbitrum Sepolia', image: 'https://assets.coingecko.com/coins/images/16547/small/arbitrum.png' },
     { id: 1, name: 'Ethereum Mainnet', image: 'https://assets.coingecko.com/coins/images/279/small/ethereum.png' },
-    { id: 137, name: 'Polygon', image: 'https://assets.coingecko.com/coins/images/4713/small/matic-token-icon.png' },
+    { id: 42161, name: 'Arbitrum', image: 'https://cryptologos.cc/logos/arbitrum-arb-logo.png' },
+    { id: 8453, name: 'Base', image: 'https://cryptologos.cc/logos/base-logo.png' },
+    { id: 59144, name: 'Linea', image: 'https://images.mirror-media.xyz/publication-images/7905-S3Y7oO_D_NlS7H13.png' },
+    { id: 56, name: 'BNB Chain', image: 'https://cryptologos.cc/logos/bnb-bnb-logo.png' },
+    { id: 10, name: 'Optimism', image: 'https://cryptologos.cc/logos/optimism-ethereum-op-logo.png' },
+    { id: 137, name: 'Polygon', image: 'https://cryptologos.cc/logos/polygon-matic-logo.png' },
+    { id: 421614, name: 'Arbitrum Sepolia', image: 'https://assets.coingecko.com/coins/images/16547/small/arbitrum.png' },
   ];
+
+  const fetchPrices = async () => {
+    try {
+      const coinIds = 'ethereum,chainlink,matic-network,arbitrum, base, binancecoin, linea-build, optimism, usd-coin,tether,pax-gold,uniswap,polkadot';
+
+      const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=20&page=1&sparkline=false'
+
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Gecko is resting...');
+
+      const data = await response.json();
+
+      const priceMap: Record<string, { price: number; image: string; symbol: string; name: string }> = {};
+
+      data.forEach((coin: any) => {
+        priceMap[coin.id] = {
+          price: coin.current_price,
+          image: coin.image,
+          symbol: coin.symbol.toUpperCase(),
+          name: coin.name
+        };
+      });
+      setPrices(priceMap);
+    } catch (error) {
+      console.error("가격 정보를 가져오는데 실패했습니다:", error);
+    }
+  };
+
   const [selectedNetwork, setSelectedNetwork] = useState(networkOptions[0]);
+
 
   const validTokens = coinList.filter(coin =>
     chain?.id && TOKEN_ADDRESSES[chain.id]?.[coin.symbol.toLowerCase()]
@@ -152,6 +231,11 @@ export default function Home() {
 
   const currentChainId = chain?.id || 0;
   const currentCustomTokens = customTokensMap[currentChainId] || [];
+
+  const coingeckoId = NETWORK_COIN_MAPPING[selectedNetwork.id];
+  const apiImage = prices[coingeckoId]?.image;
+
+  const selectedNetworkImage = apiImage || selectedNetwork.image;
 
 
   // useEffect
@@ -187,6 +271,12 @@ export default function Home() {
     };
 
     fetchCoins();
+  }, []);
+
+  useEffect(() => {
+    fetchPrices();
+    const interval = setInterval(fetchPrices, 120000); // 2분마다 업데이트
+    return () => clearInterval(interval);
   }, []);
 
   const balanceQueries = validTokens.map(coin => ({
@@ -285,18 +375,26 @@ export default function Home() {
     }
   }
 
-  const top10Portfolio = coinList.map((coin, index) => {
-    let balanceStr = myBalances[coin.symbol.toLowerCase()] || '0';
+  const top20Portfolio = Object.keys(prices).map((id, index) => {
+    const coinData = prices[id]; // fetchPrices에서 저장한 데이터
+
+    const symbol = coinData?.symbol || '';
+    const name = coinData?.name || 'Loading...';
+    const price = coinData?.price || 0;
+    const image = coinData?.image || '';
+
+    // 1. 내 잔고 가져오기 (기존 myBalances 로직 유지)
+    let balanceStr = myBalances[coinData.symbol.toLowerCase()] || '0';
 
     return {
-      id: coin.id,
-      name: coin.name,
-      symbol: coin.symbol.toUpperCase(),
-      image: coin.image,
-      current_price: coin.current_price,
+      id: id,
+      name: coinData.name,
+      symbol: coinData.symbol, // 이미 상단에서 .toUpperCase() 처리를 했다면 그대로 사용
+      image: coinData.image,   // 코인게코 API에서 가져온 실시간 로고
+      current_price: coinData.price,
       balance: balanceStr,
       isCustom: false,
-      sortIndex: index
+      sortIndex: index         // 시총 순서 유지용
     };
   });
 
@@ -311,7 +409,7 @@ export default function Home() {
     sortIndex: 10 + index // Top 10 뒤에 붙이기 위해 index를 조정
   }));
 
-  const finalPortfolio = [...top10Portfolio, ...customPortfolio];
+  const finalPortfolio = [...top20Portfolio, ...customPortfolio];
 
   const totalValue = finalPortfolio.reduce((acc, coin) => {
     const price = coin.current_price || 0;
@@ -512,7 +610,11 @@ export default function Home() {
                   <div style={{ display: 'flex', alignItems: 'center' }}>
                     <span style={{ color: '#888', marginRight: '10px', fontSize: '14px', fontWeight: 'normal' }}>네트워크:</span>
                     {/* 여기는 net이 아니라 selectedNetwork를 써야 합니다 */}
-                    <img src={selectedNetwork.image} alt={selectedNetwork.name} style={{ width: '24px', height: '24px', marginRight: '8px', borderRadius: '50%' }} />
+                    <img
+                      src={selectedNetworkImage}
+                      alt={selectedNetwork.name}
+                      style={{ width: '24px', height: '24px', marginRight: '8px', borderRadius: '50%' }}
+                    />
                     {selectedNetwork.name}
                   </div>
                   <span>{isNetworkOpen ? '▲' : '▼'}</span>
@@ -524,29 +626,53 @@ export default function Home() {
                     backgroundColor: 'white', border: '1px solid #ddd', borderRadius: '12px',
                     listStyle: 'none', padding: 0, overflow: 'hidden', boxShadow: '0 8px 16px rgba(0,0,0,0.1)'
                   }}>
-                    {networkOptions.map((net) => (
-                      <li key={net.name}>
-                        <button
-                          onClick={() => {
-                            setIsNetworkOpen(false);
-                            if (switchChain) {
-                              switchChain({ chainId: net.id })
+                    {networkOptions.map((net) => {
+                      // 1. API에서 가져온 이미지가 있으면 쓰고, 없으면 기본 net.image 사용
+                      const netApiImage = prices[NETWORK_COIN_MAPPING[net.id]]?.image || net.image;
+
+                      return (
+                        <li key={net.name}>
+                          <button
+                            onClick={() => {
+                              setIsNetworkOpen(false); // 드롭다운 닫기
+                              if (switchChain) {
+                                switchChain({ chainId: net.id }); // 네트워크 전환 요청
+                              }
+                            }}
+                            style={{
+                              width: '100%',
+                              display: 'flex',
+                              alignItems: 'center',
+                              padding: '15px',
+                              backgroundColor: selectedNetwork.name === net.name ? '#f0f7ff' : 'white',
+                              border: 'none',
+                              borderBottom: '1px solid #eee',
+                              cursor: 'pointer',
+                              fontSize: '16px',
+                              transition: '0.2s',
+                            }}
+                            onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#f9f9f9')}
+                            onMouseOut={(e) =>
+                            (e.currentTarget.style.backgroundColor =
+                              selectedNetwork.name === net.name ? '#f0f7ff' : 'white')
                             }
-                          }}
-                          style={{
-                            width: '100%', display: 'flex', alignItems: 'center', padding: '15px',
-                            backgroundColor: selectedNetwork.name === net.name ? '#f0f7ff' : 'white',
-                            border: 'none', borderBottom: '1px solid #eee', cursor: 'pointer', fontSize: '16px',
-                            transition: '0.2s'
-                          }}
-                          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f9f9f9'}
-                          onMouseOut={(e) => e.currentTarget.style.backgroundColor = selectedNetwork.name === net.name ? '#f0f7ff' : 'white'}
-                        >
-                          <img src={net.image} alt={net.name} style={{ width: '24px', height: '24px', marginRight: '10px', borderRadius: '50%' }} />
-                          {net.name}
-                        </button>
-                      </li>
-                    ))}
+                          >
+                            {/* 🌟 2. net.image 대신 API에서 가져온 netApiImage를 보여줍니다. */}
+                            <img
+                              src={netApiImage}
+                              alt={net.name}
+                              style={{
+                                width: '24px',
+                                height: '24px',
+                                marginRight: '10px',
+                                borderRadius: '50%',
+                              }}
+                            />
+                            {net.name}
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </div>
