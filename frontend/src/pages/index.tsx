@@ -102,7 +102,7 @@ export default function Home() {
     return {};
   });
 
-  const currentChainId = chain?.id || 0;
+  const currentChainId = chain?.id || selectedNetwork.id;
   const currentCustomTokens = customTokensMap[currentChainId] || [];
 
   const coingeckoId = NETWORK_COIN_MAPPING[selectedNetwork.id];
@@ -389,6 +389,36 @@ export default function Home() {
               Transfer
             </button>
           </div>
+
+          {!isConnected && (
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => setIsNetworkOpen(!isNetworkOpen)}
+                style={{ padding: '10px 15px', display: 'flex', alignItems: 'center', gap: '8px', background: 'white', border: '1px solid #ccc', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                {selectedNetwork.name} ▼
+              </button>
+
+              {isNetworkOpen && (
+                <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '5px', background: 'white', border: '1px solid #ccc', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', zIndex: 10 }}>
+                  {networkOptions.map((net) => (
+                    <div
+                      key={net.id}
+                      onClick={() => {
+                        setSelectedNetwork(net);
+                        setIsNetworkOpen(false);
+                      }}
+                      style={{ padding: '10px 20px', cursor: 'pointer', borderBottom: '1px solid #eee', whiteSpace: 'nowrap' }}
+                      onMouseOver={(e) => e.currentTarget.style.background = '#f5f5f5'}
+                      onMouseOut={(e) => e.currentTarget.style.background = 'white'}
+                    >
+                      {net.name}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {activeTab === 'main' && (
             <div style={{ marginTop: '20px' }}>
