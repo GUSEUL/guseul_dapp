@@ -2,10 +2,12 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useSwitchChain, useReadContracts, useReadContract, useWriteContract, useWaitForTransactionReceipt, useBalance } from 'wagmi';
 import { useState, useEffect } from 'react';
 import { WalletGenerator } from '../components/WalletGenerator';
+import WalletImporter from '../components/WalletImporter';
 import {
   CONTRACT_ADDRESS, USDC_ADDRESS, TOKEN_ADDRESSES, abi, erc20Abi,
   NETWORK_COIN_MAPPING, networkOptions
 } from '../constants/web3';
+
 
 export default function Home() {
   // State
@@ -20,6 +22,16 @@ export default function Home() {
 
   const [coinList, setCoinList] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  const [userAddress, setUserAddress] = useState<string | null>(null);
+  const [view, setView] = useState<'landing' | 'generate' | 'import' | 'main'>('landing');
+
+  const activeAddress = address || userAddress;
+
+  const handleConnect = (address: string) => {
+    setUserAddress(address);
+    setView('main');
+  };
 
   const [addressInput, setAddressInput] = useState("0x2205AC6063F32f4857fd65d24700fB5591Ea1Dc7, 0x0f845e28fa26DcDF8e21Dd52a895f8300Fc90dc8");
   const [amountInput, setAmountInput] = useState("1, 2");
@@ -322,18 +334,46 @@ export default function Home() {
       {/* 항상 보이는 지갑 연결 버튼 */}
       <ConnectButton />
 
-      {/* 🔥 로그인 하기 전 (연결 안 됨) 일 때만 지갑 생성기 표시 */}
-      {!isConnected && (
-        <div style={{ marginTop: '30px' }}>
-          <div style={{ marginBottom: '15px', fontSize: '14px', color: '#666', textAlign: 'center' }}>
-            지갑이 처음이신가요? 아래 버튼을 눌러 생성해보세요.
+      {!activeAddress && view === 'landing' && (
+        <div style={{ textAlign: 'center', marginTop: '30px' }}>
+          <p style={{ color: '#666', marginBottom: '30px' }}>안전한 블록체인 자산 관리를 시작하세요.</p>
+          <div style={{ display: 'flex', gap: '15px', justifyContent: 'center' }}>
+            <button
+              onClick={() => setView('generate')}
+              style={{ padding: '12px 24px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+            >
+              새 지갑 만들기
+            </button>
+            <button
+              onClick={() => setView('import')}
+              style={{ padding: '12px 24px', backgroundColor: '#f3f4f6', color: '#111827', border: '1px solid #d1d5db', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+            >
+              기존 지갑 가져오기
+            </button>
           </div>
-          <WalletGenerator />
+        </div>
+      )}
+
+      {/* 지갑 생성 화면 */}
+      {!activeAddress && view === 'generate' && (
+        <div style={{ marginTop: '30px' }}>
+          <WalletGenerator
+            onConnect={handleConnect}
+            onBack={() => setView('landing')}
+            onGoToImport={() => setView('import')}
+          />
+        </div>
+      )}
+
+      {/* 지갑 가져오기 화면 */}
+      {!activeAddress && view === 'import' && (
+        <div style={{ marginTop: '30px' }}>
+          <WalletImporter onConnect={handleConnect} onBack={() => setView('landing')} />
         </div>
       )}
 
       {/* 🔥 로그인 한 후 (연결 됨) 일 때 메인 서비스 UI 표시 */}
-      {isConnected && (
+      {activeAddress && (
         <>
           <div style={{ display: 'flex', gap: '10px', marginTop: '20px', borderBottom: '2px solid #eee', paddingBottom: '10px' }}>
             <button

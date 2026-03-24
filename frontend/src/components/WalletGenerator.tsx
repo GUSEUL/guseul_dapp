@@ -1,9 +1,15 @@
 import { useState } from 'react';
 import { ethers } from 'ethers';
 
+interface WalletGeneratorProps {
+    onConnect?: (address: string) => void;
+    onBack?: () => void;
+    onGoToImport?: () => void;
+}
+
 type Step = 'init' | 'password' | 'mnemonic' | 'encrypting' | 'done';
 
-export const WalletGenerator = () => {
+export const WalletGenerator = ({ onConnect, onBack, onGoToImport }: WalletGeneratorProps) => {
     const [step, setStep] = useState<Step>('init');
     const [password, setPassword] = useState("");
 
@@ -15,6 +21,7 @@ export const WalletGenerator = () => {
     // 최종 결과물
     const [address, setAddress] = useState("");
     const [keystoreJson, setKeystoreJson] = useState("");
+    const [privateKey, setPrivateKey] = useState("");
 
     // 1단계: 비밀번호 입력창 열기
     const startCreation = () => {
@@ -40,9 +47,12 @@ export const WalletGenerator = () => {
 
         try {
             const encryptedJson = await tempWallet.encrypt(password);
+            const generatedAddress = tempWallet.address;
+            const generatedPK = tempWallet.privateKey;
 
             setAddress(tempWallet.address);
             setKeystoreJson(encryptedJson);
+            setPrivateKey(generatedPK);
 
             // 메모리에서 니모닉과 개인키 즉시 파기 (보안)
             setTempWallet(null);
@@ -50,6 +60,8 @@ export const WalletGenerator = () => {
             setIsSaved(false);
 
             setStep('done');
+
+
         } catch (error) {
             console.error("암호화 중 오류 발생:", error);
             alert("지갑 암호화에 실패했습니다.");
@@ -79,6 +91,12 @@ export const WalletGenerator = () => {
 
     return (
         <div style={{ marginBottom: '25px', padding: '20px', backgroundColor: '#f8f9fa', borderRadius: '12px', border: '1px solid #ddd' }}>
+
+            {onBack && step === 'init' && (
+                <button onClick={onBack} style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', marginBottom: '15px', padding: '0', fontSize: '14px', textAlign: 'left', display: 'block' }}>
+                    ← 처음으로 돌아가기
+                </button>
+            )}
 
             {/* Step 0: 초기 화면 */}
             {step === 'init' && (
@@ -155,21 +173,31 @@ export const WalletGenerator = () => {
                         </div>
                     </div>
 
+                    <div style={{ marginBottom: '15px' }}>
+                        <strong style={{ fontSize: '12px', color: '#e53e3e' }}>내 개인키 (절대 노출 금지, 복사해서 로그인 테스트에 쓰세요):</strong>
+                        <div style={{ backgroundColor: '#fff5f5', padding: '10px', borderRadius: '6px', fontSize: '13px', wordBreak: 'break-all', border: '1px solid #ffcccc', marginTop: '5px', color: '#c53030' }}>
+                            {privateKey}
+                        </div>
+                    </div>
+
                     <p style={{ fontSize: '12px', color: '#666', marginBottom: '15px' }}>
                         안전을 위해 암호화된 Keystore(JSON) 파일을 다운로드해 두세요. 향후 다른 지갑 앱(메타마스크 등)에서 비밀번호와 함께 이 파일로 지갑을 복구할 수 있습니다.
                     </p>
 
-                    <div style={{ display: 'flex', gap: '10px' }}>
-                        <button onClick={downloadKeystore} style={{ flex: 2, padding: '12px', backgroundColor: '#f5a623', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>
-                            Keystore 파일 다운로드
+                    <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+                        <button onClick={downloadKeystore} style={{ flex: 1, padding: '12px', backgroundColor: '#f5a623', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>
+                            Keystore 다운로드
                         </button>
-                        <button onClick={resetGenerator} style={{ flex: 1, padding: '12px', backgroundColor: 'transparent', color: '#888', border: '1px solid #ccc', borderRadius: '6px', cursor: 'pointer' }}>
-                            닫기
-                        </button>
+
+                        {/* 🌟 '지갑 가져오기' 페이지로 넘어가는 새로운 버튼 */}
+                        {onGoToImport && (
+                            <button onClick={onGoToImport} style={{ flex: 1, padding: '12px', backgroundColor: '#0070f3', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>
+                                로그인하러 가기
+                            </button>
+                        )}
                     </div>
                 </div>
             )}
-
         </div>
     );
 };
